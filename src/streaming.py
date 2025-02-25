@@ -1,71 +1,62 @@
-import tweepy
+import praw
 import pandas as pd
 import os
 from dotenv import load_dotenv
 
-# Load environment variables (API keys)
+# Load environment variables
 load_dotenv()
 
-# Twitter API credentials
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
-ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
-ACCESS_TOKEN_SECRET = os.getenv("ACCESS_TOKEN_SECRET")
+# Reddit API credentials
+CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
+CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
+USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
-# Authenticate with Twitter API
-auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
-api = tweepy.API(auth)
+# Authenticate with Reddit API
+reddit = praw.Reddit(
+    client_id=CLIENT_ID,
+    client_secret=CLIENT_SECRET,
+    user_agent=USER_AGENT,
+)
 
-# Define a class to stream tweets
-class TweetStreamListener(tweepy.StreamingClient):
-    def __init__(self, output_file, max_tweets=100, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.output_file = output_file
-        self.max_tweets = max_tweets
-        self.tweet_count = 0
-        self.tweets = []
+# Function to collect posts from a subreddit
+def collect_posts(subreddit_name, limit=100):
+    subreddit = reddit.subreddit(subreddit_name)
+    posts = []
 
-    def on_tweet(self, tweet):
-        # Extract relevant data from the tweet
-        tweet_data = {
-            "id": tweet.id,
-            "text": tweet.text,
-            "created_at": tweet.created_at,
-            "user": tweet.user.screen_name,
-            "location": tweet.user.location,
-            "retweets": tweet.retweet_count,
-            "likes": tweet.favorite_count,
+    for post in subreddit.new(limit=limit):
+        post_data = {
+            "id": post.id,
+            "title": post.title,
+            "text": post.selftext,
+            "author": post.author.name if post.author else "deleted",
+            "upvotes": post.score,
+            "created_at": post.created_utc,
+            "url": post.url,
         }
-        self.tweets.append(tweet_data)
-        self.tweet_count += 1
+        posts.append(post_data)
 
-        # Stop streaming when max_tweets is reached
-        if self.tweet_count >= self.max_tweets:
-            self.disconnect()
+    return posts
 
-    def on_error(self, status):
-        print(f"Error: {status}")
+# Save posts to a CSV file
+def save_posts(posts, output_file):
+    df = pd.DataFrame(posts)
+    df.to_csv(output_file, index=False)
+    print(f"Saved {len(posts)} posts to {output_file}")
 
-    def on_disconnect(self):
-        # Save tweets to a CSV file
-        df = pd.DataFrame(self.tweets)
-        df.to_csv(self.output_file, index=False)
-        print(f"Saved {self.tweet_count} tweets to {self.output_file}")
-
-# Set up streaming
+# Main function
 if __name__ == "__main__":
-    # Output file for tweets
-    output_file = "data/raw/tweets.csv"
+    # Output file for posts
+    output_file = "data/raw/reddit_posts.csv"
 
     # Create the data/raw directory if it doesn't exist
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    # Keywords to track
-    keywords = ["data science", "machine learning", "AI", "artificial intelligence"]
+    # Subreddit to collect posts from
+    subreddit_name = "dataisbeautiful"  # Replace with your desired subreddit
 
-    # Initialize the stream listener
-    stream_listener = TweetStreamListener(output_file=output_file, max_tweets=100)
+    # Collect posts
+    print(f"Collecting posts from r/{subreddit_name}...")
+    posts = collect_posts(subreddit_name, limit=100)
 
-    # Start streaming
-    print("Starting tweet stream...")
-    stream_listener.filter(track=keywords)
+    # Save posts to CSV
+    save_posts(posts, output_file)
